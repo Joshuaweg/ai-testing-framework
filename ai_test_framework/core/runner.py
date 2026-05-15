@@ -102,3 +102,144 @@ class TerminalReporter:
             f"  |  {suite_result.total_ms:.0f}ms"
             f"  [{suite_result.suite_name}]"
         )
+
+
+class _SilentReporter:
+    def on_result(self, result: TestResult) -> None:
+        pass
+
+    def on_suite_end(self, suite_result: SuiteResult) -> None:
+        pass
+
+
+@dataclass
+class TestComparison:
+    name: str
+    verdict_a: Verdict
+    verdict_b: Verdict
+
+    @property
+    def changed(self) -> bool:
+        return self.verdict_a != self.verdict_b
+
+    @property
+    def regressed(self) -> bool:
+        return self.verdict_a == Verdict.PASS and self.verdict_b != Verdict.PASS
+
+    @property
+    def improved(self) -> bool:
+        return self.verdict_a != Verdict.PASS and self.verdict_b == Verdict.PASS
+
+
+@dataclass
+class ComparisonResult:
+    label_a: str
+    label_b: str
+    suite_name: str
+    comparisons: list[TestComparison]
+    result_a: SuiteResult
+    result_b: SuiteResult
+
+    @property
+    def regressions(self) -> list[TestComparison]:
+        return [c for c in self.comparisons if c.regressed]
+
+    @property
+    def improvements(self) -> list[TestComparison]:
+        return [c for c in self.comparisons if c.improved]
+
+    @property
+    def unchanged(self) -> list[TestComparison]:
+        return [c for c in self.comparisons if not c.changed]
+
+    @property
+    def all_passed_both(self) -> bool:
+        return self.result_a.all_passed and self.result_b.all_passed
+
+
+class ComparisonRunner:
+    """Runs the same TestSuite against two models and diffs the results.
+
+    Use to detect regressions when upgrading models, changing quantization,
+    tuning sampling parameters, or altering system prompts.
+    """
+
+    def __init__(self, suite: TestSuite) -> None:
+        self.suite = suite
+
+    def compare(
+        self,
+        model_a,
+        model_b,
+        label_a: Optional[str] = None,
+        label_b: Optional[str] = None,
+        reporter=None,
+    ) -> ComparisonResult:
+        label_a = label_a or getattr(model_a, "name", "model_a")
+        label_b = label_b or getattr(model_b, "name", "model_b")
+        if reporter is None:
+            reporter = ComparisonReporter()
+
+        silent = _SilentReporter()
+        result_a = self.suite.run(model_a, reporter=silent)
+        result_b = self.suite.run(model_b, reporter=silent)
+
+        comparisons = [
+            TestComparison(name=ra.name, verdict_a=ra.verdict, verdict_b=rb.verdict)
+            for ra, rb in zip(result_a.results, result_b.results)
+        ]
+
+        cr = ComparisonResult(
+            label_a=label_a,
+            label_b=label_b,
+            suite_name=self.suite.name,
+            comparisons=comparisons,
+            result_a=result_a,
+            result_b=result_b,
+        )
+        reporter.on_comparison(cr)
+        return cr
+
+
+class ComparisonReporter:
+    _VERDICT_SYMBOL = {
+        Verdict.PASS: "PASS",
+        Verdict.FAIL: "FAIL",
+        Verdict.ERROR: "ERR ",
+        Verdict.SKIP: "SKIP",
+    }
+
+    def on_comparison(self, cr: ComparisonResult) -> None:
+        sep = "\u2500" * 64
+        print(f"\n  {sep}")
+        print(f"  Comparison  [{cr.suite_name}]")
+        print(f"  A: {cr.label_a}")
+        print(f"  B: {cr.label_b}")
+        print(f"  {sep}")
+
+        col_w = max((len(c.name) for c in cr.comparisons), default=20)
+        header = f"  {'Test':<{col_w}}  {'A':<6}  {'B':<6}  Change"
+        print(header)
+        row_sep = "\u2500" * (col_w + 24)
+        print(f"  {row_sep}")
+
+        for c in cr.comparisons:
+            va = self._VERDICT_SYMBOL[c.verdict_a]
+            vb = self._VERDICT_SYMBOL[c.verdict_b]
+            if c.regressed:
+                change = "\u2193 REGRESSED"
+            elif c.improved:
+                change = "\u2191 IMPROVED"
+            elif c.changed:
+                change = "~ CHANGED"
+            else:
+                change = "\u2014"
+            print(f"  {c.name:<{col_w}}  {va:<6}  {vb:<6}  {change}")
+
+        print(f"  {sep}")
+        print(
+            f"  A: {cr.result_a.passed}/{cr.result_a.total} passed"
+            f"  |  B: {cr.result_b.passed}/{cr.result_b.total} passed"
+            f"  |  {len(cr.regressions)} regression(s)"
+            f"  |  {len(cr.improvements)} improvement(s)"
+        )
