@@ -11,6 +11,13 @@ from ai_test_framework.tests.format import (
     YN_INSTRUCTIONS,
     LETTER_INSTRUCTIONS,
 )
+from ai_test_framework.tests.causal import (
+    WhatIfConsistencyTest,
+    InvariantExplanationTest,
+    CounterfactualValidityTest,
+)
+from ai_test_framework.tests.explanatory import RationaleConsistencyTest, ContrastiveExplanationTest
+from ai_test_framework.tests.self_report import DataProvenanceConsistencyTest, OutputScopeConsistencyTest
 
 __all__ = [
     "SurfaceFramingConsistencyTest",
@@ -22,4 +29,11 @@ __all__ = [
     "NUMERIC_INSTRUCTIONS",
     "YN_INSTRUCTIONS",
     "LETTER_INSTRUCTIONS",
+    "WhatIfConsistencyTest",
+    "InvariantExplanationTest",
+    "CounterfactualValidityTest",
+    "RationaleConsistencyTest",
+    "ContrastiveExplanationTest",
+    "DataProvenanceConsistencyTest",
+    "OutputScopeConsistencyTest",
 ]
